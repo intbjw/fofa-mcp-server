@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/intbjw-fofa-mcp-server-badge.png)](https://mseep.ai/app/intbjw-fofa-mcp-server)
+
 # README
 
 # FOFA MCP Server

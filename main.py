@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import base64
 import os
-from typing import Any, Coroutine, Dict
+from typing import Any, Dict
 import httpx
 from mcp.server.fastmcp import FastMCP
 
@@ -156,16 +156,134 @@ async def fofa_userinfo() -> Any | None:
         return None
 
 
+async def fofa_search_next(query: str, fields: str, size: int = 50, next_id: str = "", full: bool = False) -> dict[str, Any] | None:
+    """基于游标的翻页查询"""
+    query_base64 = base64.b64encode(query.encode()).decode()
+    if fields == 'all':
+        fields = FOFA_FIELDS_ALL
+    else:
+        fields = FOFA_FIELDS
+    params = {
+        "key": FOFA_KEY,
+        "qbase64": query_base64,
+        "fields": fields,
+        "size": size,
+        "full": str(full).lower(),
+    }
+    if next_id:
+        params["next"] = next_id
+    headers = {"Accept-Encoding": "gzip"}
+    URL = f"{FOFA_API_URL}/search/next"
+    try:
+        response = await request_session.get(URL, params=params, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as e:
+        print(f"HTTP error occurred: {e}")
+        return None
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return None
+
+
+async def fofa_search_stats(query: str, fields: str = "title,country", size: int = 5) -> dict[str, Any] | None:
+    """查询搜索结果的聚合统计信息"""
+    query_base64 = base64.b64encode(query.encode()).decode()
+    params = {
+        "key": FOFA_KEY,
+        "qbase64": query_base64,
+        "fields": fields,
+        "size": size,
+    }
+    headers = {"Accept-Encoding": "gzip"}
+    URL = f"{FOFA_API_URL}/search/stats"
+    try:
+        response = await request_session.get(URL, params=params, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as e:
+        print(f"HTTP error occurred: {e}")
+        return None
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return None
+
+
+async def fofa_host_info(host: str, detail: bool = False) -> dict[str, Any] | None:
+    """查询某个 IP 或域名的 host 聚合信息"""
+    params = {
+        "key": FOFA_KEY,
+        "detail": str(detail).lower(),
+    }
+    headers = {"Accept-Encoding": "gzip"}
+    URL = f"{FOFA_API_URL}/host/{host}"
+    try:
+        response = await request_session.get(URL, params=params, headers=headers)
+        response.raise_for_status()
+        return response.json()
+    except httpx.HTTPError as e:
+        print(f"HTTP error occurred: {e}")
+        return None
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        return None
+
+
 @mcp.tool()
-async def fofa_search_tool(query: str, fields="", size: int = 50) -> dict[str, Any] | None:
-    """ 使用 FOFA API 进行查询，返回更多字段信息 """
-    result = await fofa_search(query, fields, size, )
+async def fofa_search_tool(query: str, fields: str = "", size: int = 50) -> Any:
+    """使用 FOFA API 进行搜索查询，返回格式化结果。
+
+    :param query: FOFA 查询语句，例如 'title="bing"' 或 'domain="example.com"'
+    :param fields: 返回字段，传 'all' 返回全部字段，留空返回默认字段
+    :param size: 返回结果数量，默认 50，最大 10000
+    """
+    result = await fofa_search(query, fields, size)
     return format_info(result, fields) if result else None
 
 
 @mcp.tool()
-async def fofa_userinfo_tool() -> Coroutine[Any, Any, Any | None]:
-    """ 查询 FOFA 账户信息 """
+async def fofa_search_next_tool(query: str, fields: str = "", size: int = 50, next_id: str = "", full: bool = False) -> Any:
+    """使用游标翻页方式查询 FOFA，适合大批量数据获取。
+
+    :param query: FOFA 查询语句
+    :param fields: 返回字段，传 'all' 返回全部字段，留空返回默认字段
+    :param size: 每页结果数量，默认 50，最大 10000
+    :param next_id: 上一次查询返回的 next 游标值，首次查询留空
+    :param full: 是否搜索全量数据（默认只搜索近一年），True 表示搜索全部
+    """
+    result = await fofa_search_next(query, fields, size, next_id, full)
+    if not result:
+        return None
+    # 将结果格式化，同时透传 next 游标供下次翻页使用
+    formatted = format_info(result, fields)
+    formatted["next"] = result.get("next", "")
+    return formatted
+
+
+@mcp.tool()
+async def fofa_stats_tool(query: str, fields: str = "title,country", size: int = 5) -> Any:
+    """查询 FOFA 搜索结果的聚合统计信息（各字段 TOP N 分布）。
+
+    :param query: FOFA 查询语句
+    :param fields: 需要聚合统计的字段，逗号分隔，例如 'title,country,port,product'
+    :param size: 每个字段返回 TOP N 条，默认 5
+    """
+    return await fofa_search_stats(query, fields, size)
+
+
+@mcp.tool()
+async def fofa_host_tool(host: str, detail: bool = False) -> Any:
+    """查询某个 IP 或域名的 host 聚合信息，包含端口、协议、产品等汇总数据。
+
+    :param host: 目标 IP 或域名，例如 '8.8.8.8' 或 'example.com'
+    :param detail: 是否返回详细数据，True 时包含更多字段信息
+    """
+    return await fofa_host_info(host, detail)
+
+
+@mcp.tool()
+async def fofa_userinfo_tool() -> Any:
+    """查询当前 FOFA 账户信息，包括剩余 F 点、API 配额等。"""
     return await fofa_userinfo()
 
 
